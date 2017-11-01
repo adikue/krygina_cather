@@ -16,6 +16,7 @@ from selenium.common.exceptions import WebDriverException, NoSuchElementExceptio
 
 my_email = "adikue@gmail.com"
 box_url = 'https://elenakrygina.com/box/'
+# box_url = 'https://elenakrygina.com/box/month/diptyque/'
 
 
 def login(driver):
@@ -23,9 +24,11 @@ def login(driver):
 
     email_form = driver.find_element_by_xpath('//*[@id="top-up-auth"]/form/div/div/input[1]')
     email_form.send_keys("litvinenko_v@inbox.ru")
+    # email_form.send_keys("adikue@gmail.com")
 
     password_form = driver.find_element_by_xpath('//*[@id="top-up-auth"]/form/div/div/input[2]')
     password_form.send_keys("yfnfif")
+    # password_form.send_keys("qweASD123")
 
     login_button = driver.find_element_by_xpath('//*[@id="top-up-auth"]/form/div/div/button')
     login_button.click()
@@ -33,7 +36,7 @@ def login(driver):
 
 def init_webdriver():
     driver = webdriver.Firefox()
-    driver.implicitly_wait(10)
+    driver.implicitly_wait(5)
     login(driver)
     return driver
 
@@ -78,9 +81,9 @@ class Box(object):
         'month': 'div.fb-item__box__month',
         'description': 'div.fb-item__text.fb-item__text_mob',
         'price': 'div.fb-item__price.fb-item__price_box',
-        'buy_button': 'a.fb-item__link__buy.btn_buy.js-buy-box',
-        'items': 'a.fb-item__link__buy.btn_buy.js-buy-box',
+        
     }
+    buy_btn_select = 'a.fb-item__link__buy.btn_buy.js-buy-box'
     item_select = 'div.fb-item__box-item'
     item_props_selects = {
         'name': 'div.fb-item__box-item__name',
@@ -108,22 +111,26 @@ class Box(object):
 
     def __init__(self, driver, url):
         super(Box, self).__init__()
-        self.buy_button = None
-        self.items = []
+        self._available = False
+        self.box_items = []
+        self.driver = driver
+        self.url = url
 
         driver.get(url)
         for name, selector in self.box_props_selects.iteritems():
             elements = driver.find_elements_by_css_selector(selector)
             for e in elements:
                 if e.text:
-                    if name == 'buy_button':
-                        setattr(self, name, e)
-                    else:
-                        str_val = e.text.capitalize()
-                        if name == 'price':
-                            str_val = str_val[:-1] + u'руб'
-                        setattr(self, name, str_val.encode('utf8', errors='ignore'))
+                    str_val = e.text.capitalize()
+                    if name == 'price':
+                        str_val = str_val[:-1] + u'руб'
+                    setattr(self, name, str_val.encode('utf8', errors='ignore'))
                     break
+
+        buy_btns = driver.find_elements_by_css_selector(self.buy_btn_select)
+        for b in buy_btns:
+            if b.text:
+                self._available = True
 
         for box_elem in driver.find_elements_by_css_selector(self.item_select):
             propetries = {'name': '', 'description': '', 'price': ''}
@@ -142,15 +149,23 @@ class Box(object):
                     propetries[name] = str_val.encode('utf8', errors='ignore')
 
             if any(propetries.values()):
-                self.items.append(Box.Item(**propetries))
+                self.box_items.append(Box.Item(**propetries))
+        
 
     @property
     def available(self):
-        return bool(self.buy_button)
+        return bool(self._available)
 
-    def buy(self):
-        if self.available:
-            self.buy_button.click()
+    def safe_buy(self):
+        self.driver.get(self.url)
+        buy_btns = self.driver.find_elements_by_css_selector(self.buy_btn_select)
+        for b in buy_btns:
+            if b.text:
+                try:
+                    self.driver.execute_script('arguments[0].click();', b)
+                except:
+                    return False
+        return True
 
     def html(self):
         s = '<html><head></head><body>\n'
@@ -160,14 +175,14 @@ class Box(object):
         s += '<blockquote>\n'
         s += '<p>%s</p>\n' % self.description
         s += '</blockquote>\n'
-        for i in self.items:
+        for i in self.box_items:
             s += i.html()
         s += '</body></html>'
         return s
 
     def __str__(self):
         s = "[%s: %s](%s): %s\n" % (self.month, self.name, self.price, self.description)
-        s += "\n".join([str(i) for i in self.items])
+        s += "\n".join([str(i) for i in self.box_items])
         return s
 
 
@@ -181,7 +196,7 @@ class BoxEmail(object):
         if inbasket:
             subj = "[kryginabox] %s в корзине. Есть 1 час чтобы купить" % box.month
         else:
-            subj = "[kryginabox] %s доступна! Иди покупай быстрее"
+            subj = "[kryginabox] %s доступна! Иди покупай быстрее" % box.month
         self.msg['Subject'] = subj
         self.msg['From'] = my_email
         self.msg['To'] = ', '.join(subscribers)
@@ -221,12 +236,9 @@ def main():
             box = Box(driver, box_url)
             if box.available:
                 logger.info('Box is available to buy. Putting into basket')
-                try:
-                    box.buy()
-                    inbasket = True
-                    logger.info('In backet now')
-                except:
-                    inbasket = False
+                inbasket = box.safe_buy()
+                logger.info('In backet - %s' % inbasket)
+                if not inbasket:
                     logger.error('Problem putting into backet')
 
                 logger.info('Generating e-mail')
