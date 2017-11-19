@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import os
 import time
 import random
 import logging
@@ -11,22 +12,32 @@ from email.mime.text import MIMEText
 from unidecode import unidecode
 from selenium import webdriver
 from selenium.common.exceptions import WebDriverException, NoSuchElementException
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 # from selenium.webdriver.common.by import By
 # from selenium.webdriver.common.keys import Keys
 
 my_email = "adikue@gmail.com"
 box_url = 'https://elenakrygina.com/box/'
-# box_url = 'https://elenakrygina.com/box/month/diptyque/'
+DRIVER_TYPE = webdriver.PhantomJS
+
+FORMAT = '%(asctime)s %(name)s: %(message)s'
+logging.basicConfig(format=FORMAT, level=logging.INFO)
+logger = logging.getLogger('KPOOLER')
 
 
 def login(driver):
     driver.get("https://elenakrygina.com/box/#top-up-auth")
+    l_button = driver.find_element_by_css_selector(
+        "a.top-up_open.header__profile-top__auth.g__icons")
+    l_button.click()
 
     email_form = driver.find_element_by_xpath('//*[@id="top-up-auth"]/form/div/div/input[1]')
+    email_form.clear()
     email_form.send_keys("litvinenko_v@inbox.ru")
     # email_form.send_keys("adikue@gmail.com")
 
     password_form = driver.find_element_by_xpath('//*[@id="top-up-auth"]/form/div/div/input[2]')
+    password_form.clear()
     password_form.send_keys("yfnfif")
     # password_form.send_keys("qweASD123")
 
@@ -34,22 +45,61 @@ def login(driver):
     login_button.click()
 
 
-def init_webdriver():
-    driver = webdriver.Firefox()
+def init_webdriver(driver_cls=DRIVER_TYPE):
+    headers = { 'Accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language':'en-US,en;q=0.5',
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64; rv:57.0) Gecko/20100101 Firefox/57.0',
+        'Connection': 'keep-alive'
+    }
+
+    caps = DesiredCapabilities.PHANTOMJS.copy()
+    for key, value in headers.iteritems():
+        caps['phantomjs.page.customHeaders.{}'.format(key)] = value
+
+    caps['phantomjs.page.settings.userAgent'] = "Mozilla/5.0 (X11; Linux x86_64; rv:57.0) Gecko/20100101 Firefox/57.0"
+
+    driver = driver_cls(desired_capabilities=caps)
+    # driver = webdriver.Firefox()
+    driver.set_window_size(1920, 1080)
+    driver.maximize_window()
     driver.implicitly_wait(5)
-    login(driver)
+    try:
+        login(driver)
+    except:
+        save_page_and_screenshot(driver)
+        raise
+
     return driver
 
 
-def save_close_webdriver():
+def safe_close_webdriver(driver):
     try:
         driver.close()
     except:
         pass
+    else:
+        logger.info('Driver has been properly closed')
 
+def save_page_and_screenshot(driver):
+    try:
+        with open('page.html', 'wb+') as page:
+            page.write(driver.page_source.encode('utf-8'))
+        driver.save_screenshot('screenshot.png')
+    except:
+        pass
+    else:
+        logger.info('Page source and screenshot were saved')
 
 class EmailSender(object):
     """docstring for EmailSender"""
+
+    sent_storage = 'sent.boxes'
+
+    basedir = os.path.dirname(sent_storage)
+    if basedir and not os.path.exists(basedir):
+        os.makedirs(basedir)
+    if not os.path.exists(sent_storage):
+        open(sent_storage, 'a+').close()
 
     def __init__(self):
         self.server = smtplib.SMTP('smtp.gmail.com', 587)
@@ -63,6 +113,7 @@ class EmailSender(object):
         self.safe_quit()
         self.server = smtplib.SMTP('smtp.gmail.com', 587)
         self.login()
+        self.init_storage(self.stor_fpath)
 
     def safe_quit(self):
         try:
@@ -70,8 +121,35 @@ class EmailSender(object):
         except:
             pass
 
+    @staticmethod
+    def _boxmail_entry(box_mail):
+        box = box_mail.box
+        inbasket = 'in basket' if box_mail.inbasket else 'available'
+        s = '[%s-%s]:%s to %s\n' % (box.month, box.name, inbasket, box_mail.msg['To'])
+        return s
+
+    @classmethod
+    def boxmail_issent(cls, box_mail):
+        with open(cls.sent_storage, 'r+') as stor:
+            sent_boxes = stor.readlines()
+        return cls._boxmail_entry(box_mail) in sent_boxes
+
+    def remember_boxmail(self, box_mail):
+        with open(self.sent_storage, 'a+') as stor:
+            stor.write(self._boxmail_entry(box_mail))
+
     def send(self, msg):
-        self.server.sendmail(msg['From'], msg['To'], msg.as_string())
+        if isinstance(msg, BoxEmail):
+            if self.boxmail_issent(msg):
+                logger.info('The mail about this box has been sent already')
+                return
+            else:
+                mail = msg.mail
+                self.server.sendmail(mail['From'], mail['To'], mail.as_string())
+                self.remember_boxmail(msg)
+                logger.info('The mail has been sent and remembered')
+        else:
+            self.server.sendmail(msg['From'], msg['To'], msg.as_string())
 
 
 class Box(object):
@@ -190,6 +268,8 @@ class BoxEmail(object):
     """docstring for BoxEmail"""
     def __init__(self, box, subscribers, inbasket=False):
         super(BoxEmail, self).__init__()
+        self.box = box
+        self.inbasket = inbasket
 
         self.msg = MIMEMultipart('alternative')
         self.msg['Content-Type'] = "text/html; charset=utf-8"
@@ -220,14 +300,22 @@ class BoxEmail(object):
         
 
 subscribers_list = [
+    'litvinenko_v@inbox.ru',
     'adikue@gmail.com',
-    'litvinenko_v@inbox.ru'
 ]
 
+def box_notsent_to(box):
+    not_sent = []
+    for dest in subscribers_list:
+        box_message = BoxEmail(box, [dest], True)
+        if not EmailSender.boxmail_issent(box_message):
+            logger.info('%r has NOT been notified' % dest)
+            not_sent.append(dest)
+        else:
+            logger.info('%r has been notified' % dest)
+    return not_sent
+
 def main():
-    FORMAT = '%(asctime)s %(name)s: %(message)s'
-    logging.basicConfig(format=FORMAT, level=logging.INFO)
-    logger = logging.getLogger('KPOOLER')
     logger.info("Started")
     driver = init_webdriver()
     while True:
@@ -235,31 +323,50 @@ def main():
         try:
             box = Box(driver, box_url)
             if box.available:
-                logger.info('Box is available to buy. Putting into basket')
-                inbasket = box.safe_buy()
-                logger.info('In backet - %s' % inbasket)
-                if not inbasket:
-                    logger.error('Problem putting into backet')
+                logger.info("Box is available to buy. "
+                    "Checking if all subscribers were notified")
+                not_sent_dst = box_notsent_to(box)
 
-                logger.info('Generating e-mail')
-                box_message = BoxEmail(box, subscribers_list, inbasket)
-                logger.info('Sending e-mail')
-                em_sender = EmailSender()
-                em_sender.send(box_message.mail)
-                em_sender.safe_quit()
-                logger.info('E-mail has been sent')
+                if not_sent_dst:
+                    logger.info("Putting into backet")
+                    inbasket = box.safe_buy()
+                    logger.info('In backet - %s' % inbasket)
+                    if not inbasket:
+                        logger.error('Problem putting into backet')
+
+                    if not_sent_dst:
+                        em_sender = EmailSender()
+                        for dest in not_sent_dst:
+                            box_message = BoxEmail(box, [dest], inbasket)
+                            logger.info('Sending e-mail to %r' % dest)
+                            em_sender = EmailSender()
+                            em_sender.send(box_message)
+                            time.sleep(1)
+                        em_sender.safe_quit() 
             else:
                 logger.info('Box is NOT available')
         except Exception as e:
             logger.error('Exception occured:')
             traceback.print_exc()
+            save_page_and_screenshot(driver)
             if isinstance(e, WebDriverException):
-                save_close_webdriver()
-                driver = init_webdriver()
-                logger.info('WebDriver has been restarted')
+                safe_close_webdriver(driver)
+                for attempt in xrange(100):
+                    logger.info('Attemprt to restart the WebDriver #%s' % attempt)
+                    try:
+                        driver = init_webdriver()
+                    except:
+                        logger.info('Failed to restart WebDriver')
+                        pass
+                    else:
+                        logger.info('WebDriver has been restarted')
+                        break
+                    time.sleep(60)
+                else:
+                    raise
             else:
                 logger.error('Unhandable exception. Exiting')
-                save_close_webdriver()
+                safe_close_webdriver(driver)
                 raise
 
         logger.info('Iteration ended')
