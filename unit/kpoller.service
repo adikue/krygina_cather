@@ -1,0 +1,13 @@
+[Unit]
+Description=KRYGINA BOX POLLER
+After=network.target
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/mkdir -p /etc/kpoller/
+ExecStart=/usr/local/bin/kpoller
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

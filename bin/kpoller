@@ -1,0 +1,75 @@
+#!/usr/bin/python
+# -*- coding: utf-8 -*-
+import os
+import time
+import random
+import logging
+
+from kpoller.__version__ import __version__
+from kpoller.web import KrWebDriver
+from kpoller.db import DbDriver, DbBox
+from kpoller.smtp import EmailSender
+
+RESOURCE_DIR = "/etc/kpoller/"
+DB_URL = os.path.join(RESOURCE_DIR, 'kp.db')
+
+my_email = "adikue@gmail.com"
+box_url = 'https://elenakrygina.com/box/'
+
+FORMAT = '%(name)s: %(message)s'
+logging.basicConfig(format=FORMAT, level=logging.INFO)
+
+
+def main():
+    logger = logging.getLogger("__MAIN__")
+    logger.info("Started %s" % __version__)
+    web_driver = KrWebDriver(my_email, "qweASD123")
+    db = DbDriver('sqlite:///%s' % DB_URL)
+
+    while True:
+        logger.info('Iteration started')
+
+        web_driver, web_box = web_driver.safe_get_box(box_url)
+        db_box = DbBox.from_kr_box(web_box)
+        if db.is_new_box(db_box):
+            logger.info(u"Found new box %s" % web_box)
+            db.add(db_box)
+        else:
+            db_box = db.get_box(web_box)
+
+        web_driver, isavilable = web_driver.safe_box_isavailable(web_box)
+        if isavilable:
+            logger.info(u"Box %s is available to buy" % web_box)
+            subs = db.get_not_notified_subs(db_box)
+            if subs:
+                try:
+                    logger.info(u"Not notified subscribers: %s" % subs)
+                except Exception as e:
+                    logger.error("Failed to log subscribers: " + str(e))
+
+                logger.info("Initializing email sender")
+                box_mail = web_box.mail()
+                em_sender = EmailSender(host="smtp.gmail.com",
+                                        user=my_email,
+                                        password="")
+                for sub in subs:
+                    em_sender, _ = em_sender.safe_sendmail(
+                        from_addr=my_email,
+                        to_addrs=sub.email,
+                        msg=box_mail)
+                    db.update_sub_notification(sub, db_box)
+                    time.sleep(1)
+                em_sender.quit()
+            else:
+                logger.info("All subscribers has been notified")
+        else:
+            logger.info(u"Box %s is NOT available" % web_box)
+
+        logger.info("Iteration ended")
+        wait_seconds = random.randint(30, 120)
+        logger.info("Will sleep for %ds" % wait_seconds)
+        time.sleep(wait_seconds)
+
+
+if __name__ == "__main__":
+    main()
