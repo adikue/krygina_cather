@@ -49,34 +49,33 @@ def main():
             db_box = db.get_box(web_box)
 
         web_driver, isavilable = web_driver.safe_box_isavailable(web_box)
-        # if isavilable:
-        logger.info(u"Box %s is available to buy" % web_box)
-        subs = db.get_not_notified_subs(db_box)
-        if subs:
-            logger.info(u"Not notified subscribers: %s" % [s.email for s in subs])
+        if isavilable:
+            logger.info(u"Box %s is available to buy" % web_box)
+            subs = db.get_not_notified_subs(db_box)
+            if subs:
+                logger.info(u"Not notified subscribers: %s" % [s.email for s in subs])
 
-            logger.info("Initializing email sender")
-            em_sender = EmailSender(host="smtp.gmail.com",
-                                    user=config.smtp_login,
-                                    password=config.smtp_pass)
-            current_ip = get_public_ip()
-            for sub in subs:
-                unsub_url = None
-                if current_ip:
-                    unsub_url = "http://%s:%s" % (current_ip, config.port) +\
-                                 app.get_unsubscribe_url(sub.email, db_box.id)
-                em_sender, _ = em_sender.safe_sendmail(
-                    from_addr=config.smtp_login,
-                    to_addrs=sub.email,
-                    msg=web_box.mail(unsubscribe_url=unsub_url))
-                time.sleep(1)
-            em_sender.quit()
-            next_wait_seconds = 3600
+                logger.info("Initializing email sender")
+                em_sender = EmailSender(host="smtp.gmail.com",
+                                        user=config.smtp_login,
+                                        password=config.smtp_pass)
+                current_ip = get_public_ip()
+                for sub in subs:
+                    unsub_url = None
+                    if current_ip:
+                        unsub_url = "http://%s:%s" % (current_ip, config.port) +\
+                                     app.get_unsubscribe_url(sub.email, db_box.id)
+                    em_sender, _ = em_sender.safe_sendmail(
+                        from_addr=config.smtp_login,
+                        to_addrs=sub.email,
+                        msg=web_box.mail(unsubscribe_url=unsub_url))
+                    time.sleep(1)
+                em_sender.quit()
+                next_wait_seconds = 3600
+            else:
+                logger.info("All subscribers has been notified")
         else:
-            logger.info("All subscribers has been notified")
-
-        # else:
-        #     logger.info(u"Box %s is NOT available" % web_box)
+            logger.info(u"Box %s is NOT available" % web_box)
 
         logger.info("Iteration ended")
         wait_seconds = next_wait_seconds or random.randint(30, 120)
