@@ -1,8 +1,10 @@
+# -*- coding: utf-8 -*-
 from sqlalchemy import Column, Integer, String, Boolean, ForeignKey,\
     create_engine
-from sqlalchemy.orm import relationship, backref, sessionmaker
+from sqlalchemy.orm import relationship, backref, sessionmaker, scoped_session
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql.expression import or_, and_
+from sqlalchemy.pool import SingletonThreadPool, StaticPool
 
 from web import KrBoxItem, KrBox
 
@@ -13,15 +15,15 @@ class Subscriber(Base):
     __tablename__ = 'subscribers'
 
     id = Column(Integer, primary_key=True)
-    email = Column(String)
+    email = Column(String, unique=True)
     active = Column(Boolean)
     last_box_id = Column(Integer, ForeignKey('boxes.id'))
     last_box = relationship('DbBox')
 
     def __repr__(self):
         return u"<Subscriber(id=%s, email=%s, active=%s, "\
-               "last_box=%s)>" % (self.id, self.email,
-                                  self.active, self.last_box)
+                "last_box_id=%s)>" % (self.id, self.email,
+                                   self.active, self.last_box_id)
 
 
 class DbBoxItem(Base):
@@ -35,8 +37,8 @@ class DbBoxItem(Base):
 
     def __repr__(self):
         return u"<DbBoxItem(id=%s, name=%s, description=%s, "\
-               "price=%s, box_id=%s)>" % (self.id, self.name, self.description,
-                                          self.price, self.box_id)
+                "price=%s, box_id=%s)>" % (self.id, self.name, self.description,
+                                           self.price, self.box_id)
 
     @classmethod
     def from_kr_box_item(cls, kr_box_item):
@@ -61,13 +63,12 @@ class DbBox(Base):
 
     def __repr__(self):
         return u"<DbBox(id=%s, name=%s, month=%s, description=%s, "\
-               "price=%s, items=%s)>" % (self.id,
-                                         self.name,
-                                         self.month,
-                                         self.description,
-                                         self.price,
-                                         self.items)
-                                         # self.subscribers)
+                "price=%s, %d items)>" % (self.id,
+                                self.name,
+                                self.month,
+                                self.description,
+                                self.price,
+                                len(self.items))
 
     @classmethod
     def from_kr_box(cls, kr_box):
@@ -80,15 +81,26 @@ class DbBox(Base):
                    items=db_box_items)
 
 
-class DbDriver(object):
-    """docstring for DbDriver"""
+class DbEngine(object):
+    """docstring for DbEngine"""
     def __init__(self, url):
-        super(DbDriver, self).__init__()
+        super(DbEngine, self).__init__()
         self.url = url
         self.engine = create_engine(url, echo=False)
         Base.metadata.create_all(self.engine)
-        Session = sessionmaker(bind=self.engine)
-        self.session = Session()
+        self.session_factory = scoped_session(sessionmaker(bind=self.engine,
+                                                           autoflush=True,
+                                                           autocommit=False))
+
+    def get_session(self):
+        return self.session_factory()
+
+
+class DbSession(object):
+    """docstring for DbSession"""
+    def __init__(self, db_engine):
+        super(DbSession, self).__init__()
+        self.session = db_engine.get_session()
 
     def add(self, db_obj):
         self.session.add(db_obj)
@@ -96,6 +108,9 @@ class DbDriver(object):
 
     def get_active_subs(self):
         return self.session.query(Subscriber).filter_by(active=True).all()
+
+    def get_subscriber_bymail(self, mail):
+        return self.session.query(Subscriber).filter_by(email=mail).one()
 
     def get_not_notified_subs(self, db_box):
         return self.session.query(Subscriber).filter(
@@ -118,8 +133,15 @@ class DbDriver(object):
             name=kr_box.name,
             month=kr_box.month).one()
 
+    def get_box_byid(self, box_id):
+        return self.session.query(DbBox).get(box_id)
 
-# db = DbDriver('sqlite:////etc/kpoller/kp.db')
+    def get_all_boxes(self):
+        return self.session.query(DbBox).all()
+
+
+
+# db = DbSession('sqlite:////etc/kpoller/kp.db')
 
 # subscriber = Subscriber(email="litvinenko_v@inbox.ru", active=True)
 # db.add(subscriber)
@@ -134,8 +156,9 @@ class DbDriver(object):
 # db.add(box)
 # print box
 
-# # sbs = db.session.query(Subscriber).filter_by(email="adikue@gmail.com").one()
-# # print sbs
+# sbs = db.session.query(Subscriber).filter_by(email="adikue@gmail.com").one()
+# sbs = db.get_active_subs()
+# print sbs[0].last_box
 
 # b = db.session.query(DbBox).filter_by(month="january").one()
 # print b

@@ -63,6 +63,7 @@ class KrWebDriver(webdriver.PhantomJS):  # webdriver.Firefox
             raise
 
     def login(self):
+        self.logger.info('Login started...')
         self.get("https://elenakrygina.com/box/#top-up-auth")
         l_button = self.find_element_by_css_selector(
             "a.top-up_open.header__profile-top__auth.g__icons")
@@ -81,6 +82,7 @@ class KrWebDriver(webdriver.PhantomJS):  # webdriver.Firefox
         login_button = self.find_element_by_xpath(
             '//*[@id="top-up-auth"]/form/div/div/button')
         login_button.click()
+        self.logger.info('Sucessfully logined')
 
     def close(self):
         try:
@@ -218,11 +220,15 @@ class KrBox(object):
     def available(self):
         return bool(self.buy_btns)
 
-    def html(self):
+    def html(self, unsubscribe_url=None):
         s = u"<html><head></head><body>\n"
         s += u"<h2>%s; %s</h2>\n" % (self.name, self.month)
         s += u"<p><em>Цена - %s&nbsp;" % self.price
         s += u"<a href=\"%s\">Купить</a></em></p>\n" % self.url
+
+        if unsubscribe_url:
+            s += u"<a href=\"%s\">Не уведомлять об этой коробке</a></em></p>\n" % unsubscribe_url
+
         s += u"<blockquote>\n"
         s += u"<p>%s</p>\n" % self.description
         s += u"</blockquote>\n"
@@ -231,7 +237,7 @@ class KrBox(object):
         s += u"</body></html>"
         return unicode(s)
 
-    def mail(self, inbasket=False):
+    def mail(self, inbasket=False, unsubscribe_url=None):
         msg = MIMEMultipart('alternative')
         msg['Content-Type'] = "text/html; charset=utf-8"
         if inbasket:
@@ -244,7 +250,7 @@ class KrBox(object):
         # According to RFC 2046, the last part of a multipart message,
         # in this case the HTML message, is best and preferred.
         msg.attach(MIMEText(self.text(), 'plain', 'utf-8'))
-        msg.attach(MIMEText(self.html(), 'html', 'utf-8'))
+        msg.attach(MIMEText(self.html(unsubscribe_url), 'html', 'utf-8'))
 
         return msg
 

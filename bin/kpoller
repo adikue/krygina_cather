@@ -4,32 +4,43 @@ import os
 import time
 import random
 import logging
+import threading
 
 from kpoller.__version__ import __version__
 from kpoller.web import KrWebDriver
-from kpoller.db import DbDriver, DbBox
+from kpoller.db import DbEngine, DbSession, DbBox
 from kpoller.smtp import EmailSender
+from kpoller.config import Config
+from kpoller.application import KpollerApp
+from kpoller.utils import get_public_ip
 
-RESOURCE_DIR = "/etc/kpoller/"
-DB_URL = os.path.join(RESOURCE_DIR, 'kp.db')
 
-my_email = "adikue@gmail.com"
-box_url = 'https://elenakrygina.com/box/'
-
-FORMAT = '%(name)s: %(message)s'
+FORMAT = u"%(name)s: %(message)s"
 logging.basicConfig(format=FORMAT, level=logging.INFO)
 
 
 def main():
+    config = Config("/etc/kpoller/kpoller.conf")
+    db_engine = DbEngine(config.db_url)
+    app = KpollerApp(db_engine, config.port)
+
     logger = logging.getLogger("__MAIN__")
     logger.info("Started %s" % __version__)
-    web_driver = KrWebDriver(my_email, "qweASD123")
-    db = DbDriver('sqlite:///%s' % DB_URL)
 
+    logger.info("Starting box WEB driver...")
+    web_driver = KrWebDriver(config.kr_login, config.kr_pass)
+    logger.info("Started box WEB driver")
+
+    logger.info("Starting DB WEB application...")
+    threading.Thread(target=app.run).start()
+    logger.info("Started DB WEB application...")
+
+    db = DbSession(db_engine)
     while True:
         logger.info('Iteration started')
+        next_wait_seconds = 0
 
-        web_driver, web_box = web_driver.safe_get_box(box_url)
+        web_driver, web_box = web_driver.safe_get_box(config.box_url)
         db_box = DbBox.from_kr_box(web_box)
         if db.is_new_box(db_box):
             logger.info(u"Found new box %s" % web_box)
@@ -38,35 +49,37 @@ def main():
             db_box = db.get_box(web_box)
 
         web_driver, isavilable = web_driver.safe_box_isavailable(web_box)
-        if isavilable:
-            logger.info(u"Box %s is available to buy" % web_box)
-            subs = db.get_not_notified_subs(db_box)
-            if subs:
-                try:
-                    logger.info(u"Not notified subscribers: %s" % subs)
-                except Exception as e:
-                    logger.error("Failed to log subscribers: " + str(e))
+        # if isavilable:
+        logger.info(u"Box %s is available to buy" % web_box)
+        subs = db.get_not_notified_subs(db_box)
+        if subs:
+            logger.info(u"Not notified subscribers: %s" % [s.email for s in subs])
 
-                logger.info("Initializing email sender")
-                box_mail = web_box.mail()
-                em_sender = EmailSender(host="smtp.gmail.com",
-                                        user=my_email,
-                                        password="")
-                for sub in subs:
-                    em_sender, _ = em_sender.safe_sendmail(
-                        from_addr=my_email,
-                        to_addrs=sub.email,
-                        msg=box_mail)
-                    db.update_sub_notification(sub, db_box)
-                    time.sleep(1)
-                em_sender.quit()
-            else:
-                logger.info("All subscribers has been notified")
+            logger.info("Initializing email sender")
+            em_sender = EmailSender(host="smtp.gmail.com",
+                                    user=config.smtp_login,
+                                    password=config.smtp_pass)
+            current_ip = get_public_ip()
+            for sub in subs:
+                unsub_url = None
+                if current_ip:
+                    unsub_url = "http://%s:%s" % (current_ip, config.port) +\
+                                 app.get_unsubscribe_url(sub.email, db_box.id)
+                em_sender, _ = em_sender.safe_sendmail(
+                    from_addr=config.smtp_login,
+                    to_addrs=sub.email,
+                    msg=web_box.mail(unsubscribe_url=unsub_url))
+                time.sleep(1)
+            em_sender.quit()
+            next_wait_seconds = 3600
         else:
-            logger.info(u"Box %s is NOT available" % web_box)
+            logger.info("All subscribers has been notified")
+
+        # else:
+        #     logger.info(u"Box %s is NOT available" % web_box)
 
         logger.info("Iteration ended")
-        wait_seconds = random.randint(30, 120)
+        wait_seconds = next_wait_seconds or random.randint(30, 120)
         logger.info("Will sleep for %ds" % wait_seconds)
         time.sleep(wait_seconds)
 

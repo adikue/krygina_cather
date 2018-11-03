@@ -41,3 +41,8 @@ def safe_retry(cls_meth, attempts=10, retry_time=10):
             raise
         return zelf, meth_ret
     return wrap
+
+
+def get_public_ip():
+    import requests
+    return requests.get('http://ip.42.pl/raw').text

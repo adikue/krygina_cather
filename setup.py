@@ -37,7 +37,7 @@ setup(
     packages=find_packages(exclude=["tests"]),
     scripts=['bin/kpoller'],
     data_files=[('/etc/systemd/system/', ['unit/kpoller.service']),
-                ('/etc/kpoller/', ['kp.db']),],
+                ('/etc/kpoller/', ['kp.db', 'config/kpoller.conf']),],
     install_requires=REQUIRED,
     include_package_data=False,
     license='MIT',
