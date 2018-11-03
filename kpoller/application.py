@@ -26,6 +26,12 @@ class KpollerApp(object):
         self.app.add_url_rule('/subscriber/<sub_mail>/subscribe',
                               view_func=self.subscribe, methods=['POST'])
 
+        self.app.after_request(self.set_text_header)
+
+    def set_text_header(self, response):
+        response.headers["Content-Type"] = "text/plain; charset=utf-8"
+        return response
+
     def get_unsubscribe_url(self, subscriber_mail, box_id):
         with self.app.test_request_context():
             return url_for('unsubscribe', sub_mail=subscriber_mail, box=box_id)
