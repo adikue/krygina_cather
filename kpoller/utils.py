@@ -23,14 +23,13 @@ def safe_retry(cls_meth, attempts=10, retry_time=10):
                 noself_args = args[1:]  # remove self
                 meth_ret = meth(*noself_args, **kwargs)
             except Exception:
-                logger.error("Exception occurred: {%s}"
+                logger.error("Exception occurred:\n%s"
                              % traceback.format_exc())
                 try:
                     new_zelf = zelf_cls(**zelf_cls_kwargs)
                     zelf = new_zelf
                 except Exception:
                     logger.info("Failed to reinit %s" % zelf_cls.__name__)
-                    raise
                 else:
                     logger.info("Successful reinit of %s" % zelf_cls.__name__)
             else:
@@ -39,6 +38,7 @@ def safe_retry(cls_meth, attempts=10, retry_time=10):
             time.sleep(retry_time)
         else:
             raise
+
         return zelf, meth_ret
     return wrap
 
