@@ -53,6 +53,12 @@ def main():
             logger.info(u"Box %s is available to buy" % web_box)
             subs = db.get_not_notified_subs(db_box)
             if subs:
+                # try to buy
+                if web_driver.safe_buy_box(web_box):
+                    logger.info(u"Box has been put to basket")
+                else:
+                    logger.info(u"Failed to buy this box")
+
                 logger.info(u"Not notified subscribers: %s" % [s.email for s in subs])
 
                 logger.info("Initializing email sender")
